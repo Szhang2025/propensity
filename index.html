@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Propensity Score Balance Explorer</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text: #1e293b;
+            --muted: #64748b;
+            --border: #e2e8f0;
+            --treated: #dc2626;
+            --control: #2563eb;
+            --good-balance: #16a34a;
+            --bad-balance: #dc2626;
+            --na: #94a3b8;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; }
+        header { text-align: center; margin-bottom: 30px; }
+        h1 { color: var(--primary); margin-bottom: 5px; }
+        h2 { margin-top: 0; }
+        h3 { margin-bottom: 6px; }
+        p.subtitle { color: var(--muted); margin-top: 0; }
+        .muted { color: var(--muted); font-size: 0.9em; }
+
+        .panel {
+            background: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.95em;
+            transition: background-color 0.2s;
+        }
+        button:hover { background-color: var(--primary-hover); }
+        button.active { background-color: var(--text); }
+        button:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+
+        .segmented button { background: #e2e8f0; color: var(--text); }
+        .segmented button:hover { background: #cbd5e1; }
+        .segmented button.active { background: var(--text); color: #fff; }
+
+        .caliper-control {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            background: #f1f5f9; padding: 8px 12px; border-radius: 6px; font-size: 0.9em;
+        }
+        .caliper-control input { width: 160px; }
+        .caliper-control output { font-family: monospace; font-weight: bold; min-width: 42px; }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+        /* Tables */
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.88em; }
+        th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        th { background-color: #f1f5f9; }
+        td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .treated-row { color: var(--treated); font-weight: bold; }
+        .control-row { color: var(--control); font-weight: bold; }
+        tr.dimmed td { opacity: 0.45; }
+        .tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 0.85em; background: #e2e8f0; }
+        .tag.bad { background: #fee2e2; color: #991b1b; }
+        .tag.good { background: #dcfce7; color: #166534; }
+
+        /* Group-mean bar charts */
+        .chart-container {
+            height: 250px;
+            display: flex;
+            align-items: flex-end;
+            gap: 20px;
+            padding: 30px 20px 0 20px;
+            background: #f8fafc;
+            border-radius: 6px;
+            border-bottom: 2px solid #cbd5e1;
+            margin-top: 10px;
+            position: relative;
+        }
+        .chart-empty {
+            position: absolute; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            text-align: center; padding: 20px; color: var(--muted); font-weight: bold;
+        }
+        .bar-group { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+        .bars { display: flex; gap: 10px; width: 100%; height: 100%; align-items: flex-end; justify-content: center; }
+        .bar {
+            width: 40px;
+            height: 0%;
+            transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 4px 4px 0 0;
+            position: relative;
+        }
+        .bar.treated { background-color: var(--treated); }
+        .bar.control { background-color: var(--control); }
+        .bar-label {
+            position: absolute; top: -22px; left: 50%; transform: translateX(-50%);
+            text-align: center; font-size: 12px; font-weight: bold; white-space: nowrap;
+        }
+        .axis-labels { display: flex; justify-content: space-around; margin-top: 8px; font-weight: bold; }
+
+        /* SMD chart */
+        .smd-container { padding: 10px 0 0; margin-top: 10px; }
+        .smd-row { display: flex; align-items: center; margin-bottom: 6px; }
+        .smd-label { width: 90px; font-weight: bold; font-size: 14px; }
+        .smd-track {
+            flex: 1; height: 20px; background: #e2e8f0; border-radius: 10px;
+            position: relative; margin: 0 14px; overflow: hidden;
+        }
+        .smd-center-line {
+            position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+            background: #64748b; z-index: 3; transform: translateX(-1px);
+        }
+        .smd-bar {
+            position: absolute; height: 100%; top: 0; z-index: 1;
+            background: var(--bad-balance);
+            transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            width: 0%; left: 50%;
+        }
+        .smd-value { width: 56px; text-align: right; font-family: monospace; font-weight: bold; }
+        .threshold-band {
+            position: absolute; top: 0; height: 100%; z-index: 2;
+            border-left: 2px dashed #475569; border-right: 2px dashed #475569;
+            transition: all 0.5s ease;
+        }
+        .smd-ticks {
+            display: flex; justify-content: space-between; font-size: 12px; color: var(--muted);
+            margin: 0 70px 0 104px; font-family: monospace;
+        }
+
+        .legend { display: flex; gap: 20px; justify-content: center; margin-bottom: 6px; flex-wrap: wrap; }
+        .legend-item { display: flex; align-items: center; gap: 5px; font-size: 14px; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .dot.treated { background: var(--treated); }
+        .dot.control { background: var(--control); }
+
+        .hidden { display: none !important; }
+        .notice { margin-top: 15px; font-size: 0.9em; background: #fef9c3; padding: 10px; border-radius: 4px; border-left: 4px solid #eab308; }
+        .notice.warn { background: #fee2e2; border-left-color: #dc2626; }
+        .summary-line { font-size: 0.9em; background: #f1f5f9; padding: 8px 10px; border-radius: 4px; margin-top: 10px; }
+
+        @media (max-width: 860px) {
+            .grid-2 { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>Propensity Score Balance Explorer</h1>
+        <p class="subtitle">See how matching, weighting, and stratification use propensity scores to balance covariates between treated and control groups, and when they cannot.</p>
+    </header>
+
+    <div class="panel">
+        <h2>1. Dataset</h2>
+        <div class="controls segmented" role="group" aria-label="Dataset">
+            <button id="ds-overlap" class="active" onclick="setDataset('overlap')">Sample A: overlapping scores</button>
+            <button id="ds-nooverlap" onclick="setDataset('nooverlap')">Sample B: no overlap (failure case)</button>
+        </div>
+        <p id="datasetDescription"></p>
+        <p class="muted">
+            Propensity scores are <strong>illustrative model scores</strong> from a fixed formula,
+            e(x) = 1 / (1 + exp(&minus;(&minus;4 + 0.06&middot;Age + 0.06&middot;BMI))).
+            They are not estimated from this sample, and treatment labels are hard-coded rather than drawn from these probabilities.
+            No outcome is modeled, so this page demonstrates <strong>covariate imbalance</strong> and its adjustment, not bias in an effect estimate.
+        </p>
+
+        <div style="display: flex; gap: 30px; flex-wrap: wrap;">
+            <div style="flex: 1.7; min-width: 320px;">
+                <div class="table-wrap">
+                    <table id="dataTable">
+                        <thead>
+                            <tr>
+                                <th class="num">ID</th>
+                                <th class="num">Age (X<sub>1</sub>)</th>
+                                <th class="num">BMI (X<sub>2</sub>)</th>
+                                <th class="num">Treatment (T)</th>
+                                <th class="num">Propensity e(x)</th>
+                                <th class="num">IPTW weight</th>
+                                <th id="roleHeader">Role in method</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <p id="overlapSummary" class="summary-line"></p>
+            </div>
+            <div style="flex: 1; min-width: 300px;">
+                <h3>Raw Group Means</h3>
+                <div class="legend">
+                    <div class="legend-item"><div class="dot treated"></div> Treated (T=1)</div>
+                    <div class="legend-item"><div class="dot control"></div> Control (T=0)</div>
+                </div>
+                <div class="chart-container" id="rawChart"></div>
+                <div class="axis-labels">
+                    <div>Age (X<sub>1</sub>)</div>
+                    <div>BMI (X<sub>2</sub>)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>2. Choose a Balancing Method</h2>
+        <div class="controls">
+            <button onclick="applyMethod('raw')" id="btn-raw" class="active">Raw Data (Unadjusted)</button>
+            <button onclick="applyMethod('matching')" id="btn-matching">Propensity Score Matching</button>
+            <button onclick="applyMethod('weighting')" id="btn-weighting">Inverse Probability Weighting (IPTW)</button>
+            <button onclick="applyMethod('stratification')" id="btn-stratification">Stratification</button>
+        </div>
+        <div class="caliper-control" id="caliperControl">
+            <label for="caliper">Matching caliper (maximum |e<sub>treated</sub> &minus; e<sub>control</sub>|):</label>
+            <input type="range" id="caliper" min="0.01" max="0.30" step="0.01" value="0.03">
+            <output id="caliperOut" for="caliper">0.03</output>
+            <span class="muted">Illustrative threshold on the probability scale, not a universal rule.</span>
+        </div>
+
+        <div class="grid-2">
+            <div>
+                <h3 id="methodTitle">Raw Data Analysis</h3>
+                <p id="methodDescription" style="min-height: 60px;"></p>
+
+                <h3>Balance Check: Standardized Mean Difference (SMD)</h3>
+                <p class="muted" style="margin-top:0;">
+                    Goal: |SMD| &lt; 0.1 (inside the dashed band). For every method, SMD = (adjusted treated mean &minus; adjusted control mean)
+                    divided by the <strong>unadjusted</strong> pooled SD, &radic;((s<sub>T</sub>&sup2; + s<sub>C</sub>&sup2;)/2), so values are comparable across methods.
+                    The axis uses one fixed scale for all methods on the selected dataset.
+                </p>
+
+                <div class="smd-container">
+                    <div class="smd-row">
+                        <div class="smd-label">Age (X<sub>1</sub>)</div>
+                        <div class="smd-track">
+                            <div class="threshold-band" id="threshAge"></div>
+                            <div class="smd-center-line"></div>
+                            <div class="smd-bar" id="smdAgeBar"></div>
+                        </div>
+                        <div class="smd-value" id="smdAgeVal">N/A</div>
+                    </div>
+                    <div class="smd-row">
+                        <div class="smd-label">BMI (X<sub>2</sub>)</div>
+                        <div class="smd-track">
+                            <div class="threshold-band" id="threshBmi"></div>
+                            <div class="smd-center-line"></div>
+                            <div class="smd-bar" id="smdBmiBar"></div>
+                        </div>
+                        <div class="smd-value" id="smdBmiVal">N/A</div>
+                    </div>
+                    <div class="smd-ticks">
+                        <span id="tickMin"></span><span>0</span><span id="tickMax"></span>
+                    </div>
+                </div>
+                <p id="methodSummary" class="summary-line"></p>
+            </div>
+
+            <div>
+                <h3 id="chartTitle">Group Means</h3>
+                <div class="legend">
+                    <div class="legend-item"><div class="dot treated"></div> Treated (T=1)</div>
+                    <div class="legend-item"><div class="dot control"></div> Control (T=0)</div>
+                </div>
+                <div class="chart-container" id="resultChart"></div>
+                <div class="axis-labels">
+                    <div>Age (X<sub>1</sub>)</div>
+                    <div>BMI (X<sub>2</sub>)</div>
+                </div>
+
+                <div id="weightNotice" class="notice hidden">
+                    <strong>Weighting:</strong> Bars show <em>weighted</em> means. Treated individuals receive weight 1/e(x) and controls 1/(1 &minus; e(x)),
+                    creating a pseudo-population that targets the average treatment effect (ATE). Effective sample sizes are shown at left.
+                </div>
+                <div id="matchNotice" class="notice hidden">
+                    <strong>Matching:</strong> Greedy 1:1 nearest-neighbor matching without replacement, restricted to pairs within the caliper.
+                    Treated individuals without an acceptable control are excluded, so the matched sample describes only the matched treated individuals.
+                </div>
+                <div id="stratNotice" class="notice hidden">
+                    <strong>Stratification:</strong> Individuals are split into 4 equal-count strata by propensity score.
+                    Adjusted means average the within-stratum means using the <em>same</em> stratum weights (share of individuals in usable strata) for both groups.
+                    Strata lacking either group are excluded and listed below.
+                </div>
+                <div id="failNotice" class="notice warn hidden"></div>
+
+                <div id="strataDetail" class="table-wrap hidden">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Stratum</th>
+                                <th class="num">e(x) range</th>
+                                <th class="num">n<sub>T</sub></th>
+                                <th class="num">n<sub>C</sub></th>
+                                <th class="num">Weight</th>
+                                <th class="num">SMD Age</th>
+                                <th class="num">SMD BMI</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="strataBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ---------------------------------------------------------------
+    // 1. Datasets
+    // ---------------------------------------------------------------
+    const DATASETS = {
+        overlap: {
+            description: "16 individuals. Treated individuals tend to be older with higher BMI, but their propensity scores interleave with those of controls, so adjustment can find comparable people.",
+            rows: [
+                { id: 1,  age: 24, bmi: 22, t: 0 },
+                { id: 2,  age: 29, bmi: 23, t: 0 },
+                { id: 3,  age: 33, bmi: 25, t: 0 },
+                { id: 4,  age: 38, bmi: 26, t: 0 },
+                { id: 5,  age: 44, bmi: 27, t: 0 },
+                { id: 6,  age: 50, bmi: 29, t: 0 },
+                { id: 7,  age: 57, bmi: 30, t: 0 },
+                { id: 8,  age: 62, bmi: 31, t: 0 },
+                { id: 9,  age: 34, bmi: 25, t: 1 },
+                { id: 10, age: 39, bmi: 26, t: 1 },
+                { id: 11, age: 45, bmi: 27, t: 1 },
+                { id: 12, age: 49, bmi: 29, t: 1 },
+                { id: 13, age: 56, bmi: 30, t: 1 },
+                { id: 14, age: 61, bmi: 31, t: 1 },
+                { id: 15, age: 64, bmi: 32, t: 1 },
+                { id: 16, age: 67, bmi: 33, t: 1 }
+            ]
+        },
+        nooverlap: {
+            description: "The original 12 individuals. Every treated person has a higher propensity score than every control, so there is no common support. Use this sample to see how each method reports failure instead of a falsely reassuring result.",
+            rows: [
+                { id: 1,  age: 25, bmi: 22, t: 0 },
+                { id: 2,  age: 30, bmi: 24, t: 0 },
+                { id: 3,  age: 35, bmi: 25, t: 0 },
+                { id: 4,  age: 42, bmi: 28, t: 0 },
+                { id: 5,  age: 55, bmi: 33, t: 1 },
+                { id: 6,  age: 60, bmi: 30, t: 1 },
+                { id: 7,  age: 65, bmi: 32, t: 1 },
+                { id: 8,  age: 50, bmi: 26, t: 1 },
+                { id: 9,  age: 48, bmi: 27, t: 1 },
+                { id: 10, age: 28, bmi: 23, t: 0 },
+                { id: 11, age: 52, bmi: 29, t: 1 },
+                { id: 12, age: 38, bmi: 26, t: 0 }
+            ]
+        }
+    };
+
+    const METRICS = ['age', 'bmi'];
+    const NUM_STRATA = 4;
+    const SMD_THRESHOLD = 0.1;
+
+    function illustrativeScore(d) {
+        const z = -4 + 0.06 * d.age + 0.06 * d.bmi;
+        const p = 1 / (1 + Math.exp(-z));
+        return Math.max(0.01, Math.min(0.99, p)); // clip to avoid extreme weights
+    }
+
+    function prepare(rows) {
+        return rows.map(r => {
+            const propensity = illustrativeScore(r);
+            const weight = r.t === 1 ? 1 / propensity : 1 / (1 - propensity);
+            return { ...r, propensity, weight };
+        });
+    }
+
+    // ---------------------------------------------------------------
+    // 2. Statistics helpers (return NaN when a quantity is undefined)
+    // ---------------------------------------------------------------
+    function calcMean(arr, key, isWeighted = false) {
+        if (arr.length === 0) return NaN;
+        let sum = 0, totalWeight = 0;
+        arr.forEach(item => {
+            const w = isWeighted ? item.weight : 1;
+            sum += item[key] * w;
+            totalWeight += w;
+        });
+        return totalWeight > 0 ? sum / totalWeight : NaN;
+    }
+
+    function calcVar(arr, key, isWeighted = false) {
+        if (arr.length < 2) return NaN;
+        const mean = calcMean(arr, key, isWeighted);
+        let sum = 0, totalWeight = 0, sumW2 = 0;
+        arr.forEach(item => {
+            const w = isWeighted ? item.weight : 1;
+            sum += w * Math.pow(item[key] - mean, 2);
+            totalWeight += w;
+            sumW2 += w * w;
+        });
+        const denominator = isWeighted ? totalWeight - sumW2 / totalWeight : totalWeight - 1;
+        if (!Number.isFinite(denominator) || denominator <= 0) return NaN;
+        return sum / denominator;
+    }
+
+    // Unadjusted pooled SD: a fixed denominator shared by every method.
+    function pooledSD(groupT, groupC, key) {
+        const sd = Math.sqrt((calcVar(groupT, key) + calcVar(groupC, key)) / 2);
+        return Number.isFinite(sd) && sd > 0 ? sd : NaN;
+    }
+
+    function smdFromMeans(meanT, meanC, sd) {
+        if (!Number.isFinite(meanT) || !Number.isFinite(meanC) || !Number.isFinite(sd) || sd <= 0) return NaN;
+        return (meanT - meanC) / sd;
+    }
+
+    function kishESS(arr) {
+        let s = 0, s2 = 0;
+        arr.forEach(d => { s += d.weight; s2 += d.weight * d.weight; });
+        return s2 > 0 ? (s * s) / s2 : NaN;
+    }
+
+    // ---------------------------------------------------------------
+    // 3. Methods (pure functions: data in, results out)
+    // ---------------------------------------------------------------
+    function analyze(data, method, opts = {}) {
+        const groupT = data.filter(d => d.t === 1);
+        const groupC = data.filter(d => d.t === 0);
+        const sd = {};
+        METRICS.forEach(m => { sd[m] = pooledSD(groupT, groupC, m); });
+
+        const result = { method, ok: true, means: {}, smd: {}, roles: {}, info: {} };
+        const finish = (meansT, meansC) => {
+            METRICS.forEach(m => {
+                result.means[m] = { t: meansT[m], c: meansC[m] };
+                result.smd[m] = smdFromMeans(meansT[m], meansC[m], sd[m]);
+            });
+            return result;
+        };
+        const meansOf = (arr, w) => Object.fromEntries(METRICS.map(m => [m, calcMean(arr, m, w)]));
+
+        if (groupT.length === 0 || groupC.length === 0) {
+            result.ok = false;
+            result.failure = "The dataset needs at least one treated and one control individual.";
+            METRICS.forEach(m => { result.means[m] = { t: NaN, c: NaN }; result.smd[m] = NaN; });
+            return result;
+        }
+
+        if (method === 'raw') {
+            return finish(meansOf(groupT, false), meansOf(groupC, false));
+        }
+
+        if (method === 'weighting') {
+            result.info.essT = kishESS(groupT);
+            result.info.essC = kishESS(groupC);
+            result.info.maxWeight = Math.max(...data.map(d => d.weight));
+            data.forEach(d => { result.roles[d.id] = 'w = ' + d.weight.toFixed(2); });
+            return finish(meansOf(groupT, true), meansOf(groupC, true));
+        }
+
+        if (method === 'matching') {
+            const caliper = opts.caliper;
+            const matchedT = [], matchedC = [];
+            const availableC = [...groupC];
+            // Match the hardest (highest-propensity) treated cases first.
+            const sortedT = [...groupT].sort((a, b) => b.propensity - a.propensity);
+
+            sortedT.forEach(t => {
+                let closestIdx = -1, minDiff = Infinity;
+                availableC.forEach((c, idx) => {
+                    const diff = Math.abs(t.propensity - c.propensity);
+                    if (diff < minDiff) { minDiff = diff; closestIdx = idx; }
+                });
+                if (closestIdx >= 0 && minDiff <= caliper + 1e-12) {
+                    const c = availableC[closestIdx];
+                    matchedT.push(t);
+                    matchedC.push(c);
+                    result.roles[t.id] = `Pair with #${c.id} (Δe ${minDiff.toFixed(3)})`;
+                    result.roles[c.id] = `Pair with #${t.id}`;
+                    availableC.splice(closestIdx, 1);
+                } else {
+                    result.roles[t.id] = 'Unmatched: excluded';
+                }
+            });
+            availableC.forEach(c => { result.roles[c.id] = 'Unused'; });
+
+            result.info.pairs = matchedT.length;
+            result.info.unmatchedT = groupT.length - matchedT.length;
+            result.info.totalT = groupT.length;
+            if (matchedT.length === 0) {
+                result.ok = false;
+                result.failure = `Matching unavailable: no treated individual has a control within the caliper of ${caliper.toFixed(2)}.`;
+                METRICS.forEach(m => { result.means[m] = { t: NaN, c: NaN }; result.smd[m] = NaN; });
+                return result;
+            }
+            return finish(meansOf(matchedT, false), meansOf(matchedC, false));
+        }
+
+        if (method === 'stratification') {
+            const sorted = [...data].sort((a, b) => a.propensity - b.propensity);
+            const n = sorted.length;
+            const strata = [];
+            for (let s = 0; s < NUM_STRATA; s++) {
+                const members = sorted.filter((_, i) => Math.floor(i * NUM_STRATA / n) === s);
+                if (members.length === 0) continue;
+                const stT = members.filter(d => d.t === 1);
+                const stC = members.filter(d => d.t === 0);
+                const usable = stT.length > 0 && stC.length > 0;
+                const st = {
+                    index: s + 1, members, stT, stC, usable,
+                    eMin: members[0].propensity, eMax: members[members.length - 1].propensity,
+                    meansT: meansOf(stT, false), meansC: meansOf(stC, false), smd: {}
+                };
+                METRICS.forEach(m => { st.smd[m] = usable ? smdFromMeans(st.meansT[m], st.meansC[m], sd[m]) : NaN; });
+                members.forEach(d => {
+                    result.roles[d.id] = `Stratum ${s + 1}` + (usable ? '' : ': excluded');
+                });
+                strata.push(st);
+            }
+
+            const usableStrata = strata.filter(s => s.usable);
+            const usableN = usableStrata.reduce((acc, s) => acc + s.members.length, 0);
+            strata.forEach(s => { s.weight = s.usable && usableN > 0 ? s.members.length / usableN : 0; });
+
+            result.info.strata = strata;
+            result.info.excludedN = n - usableN;
+            result.info.totalN = n;
+
+            if (usableStrata.length === 0) {
+                result.ok = false;
+                result.failure = `Stratification unavailable: none of the ${strata.length} strata contains both treated and control individuals, so within-stratum balance cannot be evaluated.`;
+                METRICS.forEach(m => { result.means[m] = { t: NaN, c: NaN }; result.smd[m] = NaN; });
+                return result;
+            }
+
+            // Common stratum weights for both groups.
+            const adjT = {}, adjC = {};
+            METRICS.forEach(m => {
+                adjT[m] = usableStrata.reduce((acc, s) => acc + s.weight * s.meansT[m], 0);
+                adjC[m] = usableStrata.reduce((acc, s) => acc + s.weight * s.meansC[m], 0);
+            });
+            return finish(adjT, adjC);
+        }
+
+        throw new Error('Unknown method: ' + method);
+    }
+
+    // ---------------------------------------------------------------
+    // 4. Rendering
+    // ---------------------------------------------------------------
+    const state = { datasetKey: 'overlap', data: [], method: 'raw', smdScale: 1 };
+    const fmt = (v, d = 2) => Number.isFinite(v) ? v.toFixed(d) : 'N/A';
+
+    function renderTable(result) {
+        const tbody = document.querySelector('#dataTable tbody');
+        tbody.replaceChildren();
+        const showRole = state.method !== 'raw';
+        document.getElementById('roleHeader').classList.toggle('hidden', !showRole);
+
+        state.data.forEach(d => {
+            const tr = document.createElement('tr');
+            const role = result.roles[d.id] || '';
+            if (showRole && /Unmatched|Unused|excluded/.test(role)) tr.classList.add('dimmed');
+            const cells = [
+                [d.id, 'num'], [d.age, 'num'], [d.bmi, 'num'],
+                [d.t, 'num ' + (d.t === 1 ? 'treated-row' : 'control-row')],
+                [d.propensity.toFixed(3), 'num'], [d.weight.toFixed(2), 'num']
+            ];
+            if (showRole) cells.push([role, '']);
+            cells.forEach(([text, cls]) => {
+                const td = document.createElement('td');
+                td.textContent = text;
+                if (cls) td.className = cls;
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+    }
+
+    function renderOverlapSummary() {
+        const T = state.data.filter(d => d.t === 1).map(d => d.propensity);
+        const C = state.data.filter(d => d.t === 0).map(d => d.propensity);
+        const tMin = Math.min(...T), tMax = Math.max(...T), cMin = Math.min(...C), cMax = Math.max(...C);
+        const lo = Math.max(tMin, cMin), hi = Math.min(tMax, cMax);
+        const el = document.getElementById('overlapSummary');
+        const ranges = `Treated e(x): ${tMin.toFixed(3)}–${tMax.toFixed(3)}. Control e(x): ${cMin.toFixed(3)}–${cMax.toFixed(3)}.`;
+        if (lo < hi) {
+            const inside = state.data.filter(d => d.propensity >= lo && d.propensity <= hi).length;
+            el.innerHTML = `${ranges} <span class="tag good">Overlap</span> Common support ${lo.toFixed(3)}–${hi.toFixed(3)} contains ${inside} of ${state.data.length} individuals.`;
+        } else {
+            el.innerHTML = `${ranges} <span class="tag bad">No overlap</span> Every treated score exceeds every control score.`;
+        }
+    }
+
+    function drawBars(containerId, means, emptyMessage) {
+        const container = document.getElementById(containerId);
+        container.replaceChildren();
+
+        const values = METRICS.flatMap(m => [means[m]?.t, means[m]?.c]);
+        if (emptyMessage || !values.every(Number.isFinite)) {
+            const div = document.createElement('div');
+            div.className = 'chart-empty';
+            div.textContent = emptyMessage || 'Group means unavailable.';
+            container.appendChild(div);
+            return;
+        }
+
+        // Linear scale starting at zero; no minimum bar height, so zero stays zero.
+        const maxVal = Math.max(...values, 1e-9) * 1.15;
+
+        METRICS.forEach(metric => {
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'bar-group';
+            const bars = document.createElement('div');
+            bars.className = 'bars';
+            [['treated', means[metric].t], ['control', means[metric].c]].forEach(([cls, v]) => {
+                const bar = document.createElement('div');
+                bar.className = 'bar ' + cls;
+                bar.dataset.height = Math.max(0, (v / maxVal) * 100);
+                bar.title = `${cls === 'treated' ? 'Treated' : 'Control'} mean: ${v.toFixed(2)}`;
+                const label = document.createElement('div');
+                label.className = 'bar-label';
+                label.textContent = v.toFixed(1);
+                bar.appendChild(label);
+                bars.appendChild(bar);
+            });
+            groupDiv.appendChild(bars);
+            container.appendChild(groupDiv);
+        });
+
+        requestAnimationFrame(() => {
+            container.querySelectorAll('.bar').forEach(bar => {
+                bar.style.height = `${bar.dataset.height}%`;
+            });
+        });
+    }
+
+    // One fixed scale per dataset/caliper, shared by all methods.
+    function computeSmdScale() {
+        const caliper = currentCaliper();
+        const finite = ['raw', 'matching', 'weighting', 'stratification']
+            .flatMap(m => { const r = analyze(state.data, m, { caliper }); return METRICS.map(k => r.smd[k]); })
+            .filter(Number.isFinite)
+            .map(Math.abs);
+        const maxAbs = Math.max(0.5, ...finite);
+        return Math.ceil(maxAbs * 2) / 2; // round up to the next 0.5
+    }
+
+    function updateSMD(smd) {
+        const scale = state.smdScale;
+        document.getElementById('tickMin').textContent = '−' + scale.toFixed(1);
+        document.getElementById('tickMax').textContent = '+' + scale.toFixed(1);
+
+        const offset = (SMD_THRESHOLD / scale) * 50;
+        ['threshAge', 'threshBmi'].forEach(id => {
+            const el = document.getElementById(id);
+            el.style.left = `${50 - offset}%`;
+            el.style.width = `${2 * offset}%`;
+        });
+
+        function setBar(barId, valId, value) {
+            const bar = document.getElementById(barId);
+            const val = document.getElementById(valId);
+            if (!Number.isFinite(value)) {
+                val.textContent = 'N/A';
+                val.style.color = 'var(--na)';
+                bar.style.width = '0%';
+                bar.style.left = '50%';
+                return;
+            }
+            val.textContent = value.toFixed(2);
+            const good = Math.abs(value) < SMD_THRESHOLD;
+            val.style.color = good ? 'var(--good-balance)' : 'var(--bad-balance)';
+            const width = Math.min((Math.abs(value) / scale) * 50, 50);
+            bar.style.width = `${width}%`;
+            bar.style.left = value < 0 ? `${50 - width}%` : '50%';
+            bar.style.backgroundColor = good ? 'var(--good-balance)' : 'var(--bad-balance)';
+        }
+
+        setBar('smdAgeBar', 'smdAgeVal', smd.age);
+        setBar('smdBmiBar', 'smdBmiVal', smd.bmi);
+    }
+
+    function renderStrata(result) {
+        const wrap = document.getElementById('strataDetail');
+        const body = document.getElementById('strataBody');
+        body.replaceChildren();
+        if (result.method !== 'stratification' || !result.info.strata) { wrap.classList.add('hidden'); return; }
+        wrap.classList.remove('hidden');
+        result.info.strata.forEach(s => {
+            const tr = document.createElement('tr');
+            const cells = [
+                `${s.index}`, `${s.eMin.toFixed(3)}–${s.eMax.toFixed(3)}`, s.stT.length, s.stC.length,
+                s.usable ? s.weight.toFixed(2) : '0', fmt(s.smd.age), fmt(s.smd.bmi)
+            ];
+            cells.forEach((text, i) => {
+                const td = document.createElement('td');
+                td.textContent = text;
+                if (i > 0) td.className = 'num';
+                tr.appendChild(td);
+            });
+            const status = document.createElement('td');
+            status.innerHTML = s.usable ? '<span class="tag good">Used</span>' : '<span class="tag bad">Excluded: one group only</span>';
+            tr.appendChild(status);
+            if (!s.usable) tr.classList.add('dimmed');
+            body.appendChild(tr);
+        });
+    }
+
+    function currentCaliper() {
+        return parseFloat(document.getElementById('caliper').value);
+    }
+
+    const METHOD_TEXT = {
+        raw: {
+            title: 'Raw Data Analysis',
+            chart: 'Group Means (Raw)',
+            desc: 'Comparing groups without adjustment. Treated individuals are older and have higher BMI on average: this is covariate imbalance.'
+        },
+        matching: {
+            title: 'Propensity Score Matching',
+            chart: 'Group Means (Matched Sample)',
+            desc: 'Each treated individual, starting with the highest score, is paired with the closest unused control, but only if the scores differ by no more than the caliper.'
+        },
+        weighting: {
+            title: 'Inverse Probability Weighting (IPTW)',
+            chart: 'Group Means (Weighted)',
+            desc: 'Individuals are weighted by the inverse of their probability of receiving the treatment they actually received.'
+        },
+        stratification: {
+            title: 'Stratification (Subclassification)',
+            chart: 'Group Means (Stratum-Adjusted)',
+            desc: 'Data are divided into 4 propensity strata. Treated and control means are computed within each usable stratum, then combined with common stratum weights.'
+        }
+    };
+
+    function applyMethod(method) {
+        state.method = method;
+        document.querySelectorAll('.controls:not(.segmented) button').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`btn-${method}`).classList.add('active');
+        document.querySelectorAll('.notice').forEach(el => el.classList.add('hidden'));
+        document.getElementById('caliperControl').classList.toggle('hidden', method !== 'matching');
+
+        const text = METHOD_TEXT[method];
+        document.getElementById('methodTitle').textContent = text.title;
+        document.getElementById('methodDescription').textContent = text.desc;
+
+        const result = analyze(state.data, method, { caliper: currentCaliper() });
+        const chartTitle = document.getElementById('chartTitle');
+        const fail = document.getElementById('failNotice');
+        const summary = document.getElementById('methodSummary');
+
+        if (method === 'matching') document.getElementById('matchNotice').classList.remove('hidden');
+        if (method === 'weighting') document.getElementById('weightNotice').classList.remove('hidden');
+        if (method === 'stratification') document.getElementById('stratNotice').classList.remove('hidden');
+
+        if (!result.ok) {
+            chartTitle.textContent = text.title.split(' (')[0] + ' Unavailable';
+            fail.textContent = result.failure;
+            fail.classList.remove('hidden');
+            drawBars('resultChart', result.means, 'No adjusted group means to display.');
+        } else {
+            chartTitle.textContent = text.chart;
+            drawBars('resultChart', result.means);
+        }
+        updateSMD(result.smd);
+        renderStrata(result);
+        renderTable(result);
+
+        // Method-specific summary line
+        let s = '';
+        if (method === 'raw') {
+            const nT = state.data.filter(d => d.t === 1).length;
+            s = `${nT} treated and ${state.data.length - nT} control individuals, all included.`;
+        } else if (method === 'matching') {
+            s = `${result.info.pairs} matched pair(s); ${result.info.unmatchedT} of ${result.info.totalT} treated individual(s) unmatched and excluded (caliper ${currentCaliper().toFixed(2)}).`;
+        } else if (method === 'weighting') {
+            s = `Effective sample size: treated ${fmt(result.info.essT, 1)}, control ${fmt(result.info.essC, 1)}. Largest weight ${fmt(result.info.maxWeight)}.`;
+        } else if (method === 'stratification') {
+            const used = result.info.strata.filter(x => x.usable).length;
+            s = `${used} of ${result.info.strata.length} strata usable; ${result.info.excludedN} of ${result.info.totalN} individuals excluded because their stratum lacks one group.`;
+            if (result.ok && result.info.excludedN > 0) s += ' The adjusted means describe only the usable strata.';
+        }
+        const balanced = result.ok && METRICS.every(m => Number.isFinite(result.smd[m]) && Math.abs(result.smd[m]) < SMD_THRESHOLD);
+        summary.innerHTML = s + (result.ok
+            ? (balanced ? ' <span class="tag good">Both |SMD| &lt; 0.1</span>' : ' <span class="tag bad">Imbalance remains</span>')
+            : ' <span class="tag bad">Balance not evaluable</span>');
+    }
+
+    function setDataset(key) {
+        state.datasetKey = key;
+        state.data = prepare(DATASETS[key].rows);
+        document.querySelectorAll('.segmented button').forEach(b => b.classList.remove('active'));
+        document.getElementById(key === 'overlap' ? 'ds-overlap' : 'ds-nooverlap').classList.add('active');
+        document.getElementById('datasetDescription').textContent = DATASETS[key].description;
+
+        const raw = analyze(state.data, 'raw');
+        drawBars('rawChart', raw.means);
+        renderOverlapSummary();
+        state.smdScale = computeSmdScale();
+        applyMethod(state.method);
+    }
+
+    // ---------------------------------------------------------------
+    // 5. Initialization
+    // ---------------------------------------------------------------
+    window.addEventListener('DOMContentLoaded', () => {
+        const caliper = document.getElementById('caliper');
+        caliper.addEventListener('input', () => {
+            document.getElementById('caliperOut').textContent = currentCaliper().toFixed(2);
+            state.smdScale = computeSmdScale();
+            applyMethod(state.method);
+        });
+        setDataset('overlap');
+    });
+</script>
+</body>
+</html>
