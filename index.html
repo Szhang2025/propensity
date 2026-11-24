@@ -76,7 +76,8 @@
         .caliper-control input { width: 160px; }
         .caliper-control output { font-family: monospace; font-weight: bold; min-width: 42px; }
 
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+        .grid-2 > * { min-width: 0; }
 
         /* Tables */
         .table-wrap { overflow-x: auto; }
@@ -144,7 +145,7 @@
             transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
             width: 0%; left: 50%;
         }
-        .smd-value { width: 56px; text-align: right; font-family: monospace; font-weight: bold; }
+        .smd-value { width: 64px; text-align: right; font-family: monospace; font-weight: bold; }
         .threshold-band {
             position: absolute; top: 0; height: 100%; z-index: 2;
             border-left: 2px dashed #475569; border-right: 2px dashed #475569;
@@ -152,7 +153,7 @@
         }
         .smd-ticks {
             display: flex; justify-content: space-between; font-size: 12px; color: var(--muted);
-            margin: 0 70px 0 104px; font-family: monospace;
+            margin: 0 78px 0 104px; font-family: monospace;
         }
 
         .legend { display: flex; gap: 20px; justify-content: center; margin-bottom: 6px; flex-wrap: wrap; }
@@ -167,7 +168,7 @@
         .summary-line { font-size: 0.9em; background: #f1f5f9; padding: 8px 10px; border-radius: 4px; margin-top: 10px; }
 
         @media (max-width: 860px) {
-            .grid-2 { grid-template-columns: 1fr; }
+            .grid-2 { grid-template-columns: minmax(0, 1fr); }
         }
     </style>
 </head>
@@ -194,7 +195,7 @@
         </p>
 
         <div style="display: flex; gap: 30px; flex-wrap: wrap;">
-            <div style="flex: 1.7; min-width: 320px;">
+            <div style="flex: 1.7; min-width: 0; max-width: 100%;">
                 <div class="table-wrap">
                     <table id="dataTable">
                         <thead>
@@ -213,7 +214,7 @@
                 </div>
                 <p id="overlapSummary" class="summary-line"></p>
             </div>
-            <div style="flex: 1; min-width: 300px;">
+            <div style="flex: 1; min-width: min(300px, 100%);">
                 <h3>Raw Group Means</h3>
                 <div class="legend">
                     <div class="legend-item"><div class="dot treated"></div> Treated (T=1)</div>
@@ -473,7 +474,6 @@
             result.info.essT = kishESS(groupT);
             result.info.essC = kishESS(groupC);
             result.info.maxWeight = Math.max(...data.map(d => d.weight));
-            data.forEach(d => { result.roles[d.id] = 'w = ' + d.weight.toFixed(2); });
             return finish(meansOf(groupT, true), meansOf(groupC, true));
         }
 
@@ -518,9 +518,14 @@
         if (method === 'stratification') {
             const sorted = [...data].sort((a, b) => a.propensity - b.propensity);
             const n = sorted.length;
+            // Equal-count split, but tied scores always share the first tied position's stratum.
+            const stratumOf = sorted.map((d, i) => {
+                const first = sorted.findIndex(x => x.propensity === d.propensity);
+                return Math.floor(first * NUM_STRATA / n);
+            });
             const strata = [];
             for (let s = 0; s < NUM_STRATA; s++) {
-                const members = sorted.filter((_, i) => Math.floor(i * NUM_STRATA / n) === s);
+                const members = sorted.filter((d, i) => stratumOf[i] === s);
                 if (members.length === 0) continue;
                 const stT = members.filter(d => d.t === 1);
                 const stC = members.filter(d => d.t === 0);
@@ -573,7 +578,7 @@
     function renderTable(result) {
         const tbody = document.querySelector('#dataTable tbody');
         tbody.replaceChildren();
-        const showRole = state.method !== 'raw';
+        const showRole = state.method === 'matching' || state.method === 'stratification';
         document.getElementById('roleHeader').classList.toggle('hidden', !showRole);
 
         state.data.forEach(d => {
@@ -687,7 +692,7 @@
                 bar.style.left = '50%';
                 return;
             }
-            val.textContent = value.toFixed(2);
+            val.textContent = value.toFixed(3);
             const good = Math.abs(value) < SMD_THRESHOLD;
             val.style.color = good ? 'var(--good-balance)' : 'var(--bad-balance)';
             const width = Math.min((Math.abs(value) / scale) * 50, 50);
@@ -801,8 +806,14 @@
             if (result.ok && result.info.excludedN > 0) s += ' The adjusted means describe only the usable strata.';
         }
         const balanced = result.ok && METRICS.every(m => Number.isFinite(result.smd[m]) && Math.abs(result.smd[m]) < SMD_THRESHOLD);
+        let retained = 1;
+        if (result.ok && method === 'matching') retained = result.info.pairs / result.info.totalT;
+        if (result.ok && method === 'stratification') retained = 1 - result.info.excludedN / result.info.totalN;
+        const caution = retained < 0.5
+            ? ` <span class="tag bad">Caution: only ${Math.round(retained * 100)}% retained; balance in a tiny sample is not reassuring</span>`
+            : '';
         summary.innerHTML = s + (result.ok
-            ? (balanced ? ' <span class="tag good">Both |SMD| &lt; 0.1</span>' : ' <span class="tag bad">Imbalance remains</span>')
+            ? (balanced ? ' <span class="tag good">Both |SMD| &lt; 0.1</span>' + caution : ' <span class="tag bad">Imbalance remains</span>' + caution)
             : ' <span class="tag bad">Balance not evaluable</span>');
     }
 
